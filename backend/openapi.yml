@@ -1,0 +1,1361 @@
+openapi: '3.1.1'
+info:
+  title: API для сервиса заявок в IT-поддержку
+  version: '1.0'
+  description: | 
+    # Назначение сервиса
+    Данный API предназначен для автоматизации процессов технической поддержки внутри компании. Сервис обеспечивает полный жизненный цикл обработки обращений: от создания заявки сотрудником до её разрешения специалистом IT-отдела и последующего закрытия.
+    # Роли пользователей
+    * *Сотрудник* - Создает заявки при проблемах с программным обеспечением или оборудованием. 
+    * *Специалист* - Принимает заявки Сотрудников, оказывает им поддержку путем переписки.
+    * *Администратор* - Управляет аккаунтами пользователей системы, настраивает категории проблем.
+    * *Аудитор* - Собирает статистику о работе IT-отдела.
+    # Общие ошибки
+    Статусы *500 Internal Server Error* (внутренний сбой системы) и *503 Service Unavailable* (временная недоступность сервиса или перегрузка) являются **глобальными**. Они могут возникнуть при вызове любого эндпоинта данного API и намеренно исключены из описания конкретных методов во избежание дублирования.
+servers:
+  - url: https://example.com/api/v1
+security:
+  - bearerAuth: []
+paths:
+
+  # --- Управление пользовательскими аккаунтами (Администратор)
+
+  /users:
+    get:
+      summary: Получение списка пользователей
+      description: | 
+        Получение списка пользователей и информации о них Администратором. 
+        
+        Доступно строго только Администратору.
+
+      tags: ["Users (Администратор)"]
+      operationId: getUsersList
+      parameters:
+        - name: limit
+          in: query
+          description: Количество возвращаемых пользователей
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Количество пропускаемых пользователей от начала списка
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Информация о пользователях успешно извелечена.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [users, pagination]
+                properties:
+                  users:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/UserID"
+                        - $ref: "#/components/schemas/UserAccount"
+                        - type: object
+                          required: [user_id, login, role, firstname, lastname, department_name, workplace]
+                          properties: 
+                            department_name:
+                              $ref: "#/components/schemas/DepartmentItem/properties/department_name"
+                          
+                  pagination:
+                    type: object
+                    required: [limit, offset, total_users]
+                    properties:
+                      limit:
+                        type: integer
+                        description: Количество возвращаемых пользователей
+                        default: 10
+                        minimum: 1
+                        maximum: 100
+                      offset:
+                        type: integer
+                        description: Количество пропускаемых пользователей от начала списка
+                        default: 0
+                        minimum: 0
+                      total_users:
+                        type: integer
+                        description: Общее число пользователей
+                        example: 124
+
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden" 
+        
+
+    post:
+      summary: Создание аккаунта пользователю
+      description: | 
+        При создании аккаунта Администратор выбирает роль пользователя enum (Employee, Specialist). В зависимости от роли, в запросе передаются разные данные.
+        Доступно строго только Администратору.
+      tags: ["Users (Администратор)"]
+      operationId: createUser
+      requestBody:
+        required: true
+        description: Отправка данных о новом Сотруднике или Специалисте
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/UserAccount"
+                - type: object
+                  required: [login, role, firstname, lastname, department_id, password]
+                  properties:
+                    department_id:
+                      $ref: "#/components/schemas/DepartmentItem/properties/department_id" 
+                    password:
+                      type: string
+                      example: "password_qwerty"
+      responses:
+        '201':
+          description: Успешное создание пользователя.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserID"
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '409':
+          description: Пользователь с таким логином уже существует.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '422':
+          description: Можно создать только пользователя с ролью Employee или Specialist
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        
+  /users/{user_id}:  
+    patch:
+      summary: Изменение данных аккаунта пользователю
+      description: | 
+        Позволяет изменить указанное поле у пользователя. 
+
+        Доступно строго только Администратору.
+      tags: ["Users (Администратор)"]
+      operationId: changeUser
+      parameters:
+        - name: user_id
+          description: Идентификатор пользователя, у которого изменяются данные
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            example: 12
+      requestBody:
+        required: true
+        description: Частичное обновление данных аккаунта пользователя. Передаются только те поля, которые нужно изменить.
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/UserAccount"
+                - type: object
+                  properties: 
+                    department_id:
+                      $ref: "#/components/schemas/DepartmentItem/properties/department_id"
+
+      responses:
+        '200':
+          description: Данные успешно обновлены
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/UserID"
+                  - $ref: "#/components/schemas/UserAccount"
+                  - type: object
+                    properties:
+                      department_name:
+                        $ref: "#/components/schemas/DepartmentItem/properties/department_name" 
+
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Пользователь не найден.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '409':
+          description: Пользователь с таким логином уже существует.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '422':
+          description: Рабочее место может быть назначено только для пользователя с ролью Employee.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+
+    delete:
+      summary: Удаление аккаунта пользователю
+      description: | 
+        Удаление аккаунта пользователя. 
+
+        Доступно строго только Администратору.
+      tags: ["Users (Администратор)"]
+      operationId: deleteUser
+      parameters:
+        - name: user_id
+          description: Идентификатор пользователя, у которого изменяются данные
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            example: 12
+      responses:
+        '204':
+          description: Пользователь успешно удален. Тело ответа не требуется.
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Пользователь не найден.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /users/{user_id}/password:
+    put:
+      summary: Сброс пароля пользователя
+      description: |
+        Позволяет Администратору сбрасывать старый пароль пользователя и задавать новый.
+
+        Доступно строго только Администратору.
+      operationId: changePassword
+      tags: ["Users (Администратор)"]
+      parameters:
+        - name: user_id
+          description: Идентификатор пользователя, у которого изменяются данные
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            example: 12
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPassword"
+      responses:
+        '204':
+          description: Пароль успешно изменен.
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Пользователь не найден.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  
+  # --- Работа с заявками со стороны сотрудника
+
+  /tickets/my:
+    get:
+      summary: Получение списка своих заявок сотрудником
+      description: | 
+        Сотрудник получает список всех своих когда-либо созданных заявок. 
+        
+        Заявки сортируются по дате создания (от новой к старой).
+
+        Доступно строго только Сотруднику. 
+      tags: ["Tickets (Сотрудник)"]
+      operationId: getMyTicketsEmployee
+      parameters:
+        - name: limit
+          in: query
+          description: Количество возвращаемых заявок
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Количество пропускаемых заявок от начала списка
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Информация о заявках успешно извлечена
+          content: 
+            application/json:
+              schema:
+                type: object
+                required: [tickets, pagination]
+                properties:
+                  tickets:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/TicketID"
+                        - $ref: "#/components/schemas/TicketInfo"
+                        - $ref: "#/components/schemas/TicketCategory"
+                        - $ref: "#/components/schemas/TicketOverview"
+                        - $ref: "#/components/schemas/TicketSpecialist"
+                        - type: object
+                          required: [total_count, ticket_id, created_at, category_name, overview, status]
+                  pagination:
+                    type: object
+                    required: [limit, offset, total_tickets]
+                    properties:
+                      limit:
+                        type: integer
+                        description: Количество возвращаемых заявок
+                        default: 10
+                        minimum: 1
+                        maximum: 100
+                      offset:
+                        type: integer
+                        description: Количество пропускаемых заявок от начала списка
+                        default: 0
+                        minimum: 0
+                      total_tickets:
+                        type: integer
+                        description: Общее число заявок
+                        example: 124
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+  
+  /tickets:
+    post:
+      summary: Создание заявки
+      description: | 
+        Создание заявки сотрудником с заполнением данных о проблеме.
+
+        Доступно строго только Сотруднику.
+      tags: ["Tickets (Сотрудник)"]
+      operationId: createTicket
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/TicketOverview"
+                - type: object
+                  required: [category_id, overview]
+                  properties: 
+                    category_id:
+                      $ref: "#/components/schemas/CategoryItem/properties/category_id"
+                     
+      responses:
+        '201':
+          description: Заявка успешно создана
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketID"
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '409':
+          description: У Сотрудника есть активная заявка.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '422':
+          description: Ошибка бизнес-логики. Выбор несуществующей категории заявки.
+          content: 
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    
+    
+    
+    get:
+      tags: ["Reporting (Аудитор)"]
+      summary: Получение всех заявок и статистики по ним
+      description: | 
+        Возвращает сводную аналитику по заявкам (счетчики по статусам) и реестр заявок с поддержкой фильтрации и пагинации.
+        
+        Доступно строго только Аудитору.
+      operationId: getReporting
+      parameters:
+        - name: limit
+          in: query
+          description: Количество возвращаемых заявок
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 100
+        - name: offset
+          in: query
+          description: Количество пропускаемых заявок от начала списка
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: sort
+          in: query
+          description: Столбец сортировки данных
+          schema:
+            type: string
+            example: created_at
+        - name: order
+          description: Направление сортировки (asc/desc)
+          in: query
+          schema:
+            type: string
+            example: asc
+        - name: status
+          in: query
+          description: Фильтрация по статусу заявки
+          schema:
+            type: array
+            items:
+              type: string
+              enum: ["Создана", "В работе", "Закрыта специалистом", "Отправлена на доработку", "Закрыта"]
+          style: form
+          explode: true
+          example: ["В работе", "Создана"]
+        - name: category_name
+          in: query
+          description: Фильтрация по названию категории проблемы
+          schema:
+            type: string
+            example: "Устройства ввода"
+        - name: specialist_id
+          in: query
+          description: ID специалиста, назначенного на заявку
+          schema:
+            type: integer
+            format: int32
+            example: 12
+      responses:
+        '200':
+          description: Информация о заявках успешно извлечена.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [stats, tickets, pagination]
+                properties:
+                  stats:
+                    required: [total_tickets_count, created_tickets_count, in_progress_tickets_count, rejected_tickets_count, closed_tickets_count]
+                    properties:
+                      total_tickets_count:
+                        type: integer
+                        description: Общее число заявок
+                        format: int64
+                        example: 120
+                      created_tickets_count:
+                        type: integer
+                        description: Число заявок со статусом "Создана"
+                        format: int64
+                        example: 40
+                      in_progress_tickets_count:
+                        type: integer
+                        description: Число заявок со статусом "В работе"
+                        format: int64
+                        example: 40
+                      rejected_tickets_count:
+                        type: integer
+                        description: Число заявок со статусом "Отправлена на доработку"
+                        format: int64
+                        example: 40
+                      closed_tickets_count:
+                        type: integer
+                        description: Число заявок со статусом "Закрыта"
+                        format: int64
+                        example: 40
+                  tickets:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/TicketID"
+                        - $ref: "#/components/schemas/TicketInfo"
+                        - $ref: "#/components/schemas/TicketSpecialist"
+                        - $ref: "#/components/schemas/TicketCategory"
+                        - type: object
+                          required: [ticket_id, status, category_name, firstname_specialist, lastname_specialist, created_at, closed_at,]
+                  pagination:
+                    type: object
+                    required: [limit, offset]
+                    properties:
+                      limit:
+                        type: integer
+                        description: Количество возвращаемых пользователей
+                        default: 10
+                        minimum: 1
+                        maximum: 100
+                      offset:
+                        type: integer
+                        description: Количество пропускаемых пользователей от начала списка
+                        default: 0
+                        minimum: 0
+                  filters:
+                    type: object
+                    properties:
+                      sort:
+                        type: string
+                        description: Столбец сортировки данных
+                        example: created_at
+                      order:
+                        type: string
+                        description: Направление сортировки (asc/desc)
+                        enum: ["asc", "desc"]
+                        example: asc
+                      status:
+                        type: array
+                        items:
+                          type: string
+                      category_name:
+                        type: string
+                      specialist_id:
+                        type: integer
+                        format: int32
+                        example: 12
+
+ 
+               
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+                
+  /users/specialists:
+    get:
+      summary: Получение информации о специалистах
+      description: |
+        Отображение ID, имя и фамилия о всех пользователях с ролью "Специалист".
+
+        Доступно строго только Аудитору.
+      operationId: getSpecialistsList
+      tags: [Reporting (Аудитор)]
+      responses:
+        '200':
+          description: Информация о специалистах успешно извлечена.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  allOf:
+                    - $ref: "#/components/schemas/UserID"
+                    - type: object
+                      required: [firstname, lastname]
+                      properties:
+                        firstname:
+                          $ref: "#/components/schemas/UserAccount/properties/firstname"
+                        lastname:
+                          $ref: "#/components/schemas/UserAccount/properties/lastname"
+                          
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+                      
+
+  /tickets/{ticket_id}:
+    patch: 
+      summary: Обновление статуса заявки
+      description: | 
+        1. Специалист может взять заявку в работу, если у него нет заявок в статусе "В работе". Тогда клиент отправляет статус заявки "В работе".
+
+        2. Специалист может закрыть принятую им заявку. Тогда клиент отправляет статус заявки "Закрыта специалистом".
+        
+        3. Сотрудник может закрыть созданную им заявку в любой момент. Тогда клиент отправляет статус заявки "Закрыта". 
+        
+        4. Если заявка была закрыта Специалистом (статус заявки "Закрыта специалистом"), то Сотрудник может попросить дополнительную помощь отправив в теле запроса статус заявки "Отправлена на доработку". 
+
+        Доступно строго только Сотруднику и Специалисту.
+      tags: ["Tickets (Сотрудник)", Tickets (Специалист)]
+      operationId: closeTicketEmployee
+      parameters:
+        - name: "ticket_id"
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            format: int64
+            example: 3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Статус заявки
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: ["В работе", "Закрыта специалистом", "Отправлена на доработку", "Закрыта"]
+                  example: Закрыта
+      responses:
+        '204':
+          description: Статус заявки изменен.
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Заявка не найдена.
+          content: 
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '409':
+          description: Недопустимый переход из текущего статуса заявки (например, заявка уже закрыта или уже в работе)
+          content: 
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          
+
+    get:
+      summary: Получение информации по заявке
+      description: |
+        Специалист получает информацию по принятой им заявке (Заявке со статусом "В работе")
+
+        Доступно строго только Специалисту.
+      tags: [Tickets (Специалист)]
+      operationId: getTicketInfo
+      parameters:
+        - name: "ticket_id"
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            format: int64
+            example: 3
+      responses:
+        '200':
+          description: Информация о принятой заявке успешно извлечена.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/TicketID"
+                  - $ref: "#/components/schemas/TicketCategory"
+                  - $ref: "#/components/schemas/TicketOverview"
+                  - $ref: "#/components/schemas/TicketEmployee"
+                  - type: object
+                    required: [workplace, created_at, ticket_id, category_name, overview, department_name, firstname_employee, lastname_employee]
+                    properties: 
+                      department_name:
+                        $ref: "#/components/schemas/DepartmentItem/properties/department_name"
+                      workplace:
+                        $ref: "#/components/schemas/UserAccount/properties/workplace"
+                      created_at:
+                        $ref: "#/components/schemas/TicketInfo/properties/created_at"               
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':  
+          description: Заявка с таким ID не найдена.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+                
+  /tickets/queue:
+    get:
+      summary: Получение списка входящих заявок
+      description: | 
+        Получение списка входящих заявок Специалистом.
+      
+        Доступно строго только Специалисту.
+      tags: [Tickets (Специалист)]
+      operationId: getIncomingTickets
+      responses:
+        '200':
+          description: Информация о входящих заявках успешно извлечена.
+          content:
+            application/json:
+              schema:
+                type: array
+                description: Входящие заявки
+                items:
+                  allOf:
+                    - $ref: "#/components/schemas/TicketID"
+                    - $ref: "#/components/schemas/TicketCategory"
+                    - type: object
+                      required: [created_at, ticket_id, category_name]
+                      properties: 
+                        created_at:
+                          $ref: "#/components/schemas/TicketInfo/properties/created_at"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+
+
+
+  /auth/login:
+    post:
+      summary: Аутентификация пользователя
+      tags: [Authorization]
+      operationId: auth
+      security: []
+      requestBody:
+        required: true
+        description: Учетные данные пользователя
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthRequest"
+      responses:
+        '200':
+          description: Успешная аутентификация.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          description: Неверный логин или пароль.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  
+
+  /tickets/{ticket_id}/messages:
+    get:
+      summary: Получение всех сообщений чата
+      description: | 
+        Специалист или Сотрудник получают все сообщения из чата заявки, за которой они закреплены.
+
+        Специалист может получить историю сообщений, только когда заявка которую он принял в статусе "В работе". Если он ее уже закрыл то Система выдает ему 409.
+
+        Сотрудник может обратиться к чату созданной им заявки в любой момент.
+
+        Доступно строго только Сотруднику и Специалисту.
+      tags: [Chatting (Сотрудник и Специалист)]
+      operationId: getChatHistory
+      parameters:
+        - name: ticket_id
+          required: true
+          in: path
+          description: Идентификационный номер заявки
+          schema:
+            type: integer
+            format: int64
+            example: 12
+      responses:
+        '200':
+          description: История чата успешно извлечена.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Заявка с таким ID не найдена.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '409':
+          description: Специалист может получить историю чата только у заявки со статусом "В работе".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+
+    post:
+      summary: Отправка сообщения
+      description: |
+        Сотрудник или Специалист могут отправить сообщение в чате, закрепленным за ними только если статус заявки "В работе".
+
+        Доступно строго только Сотруднику и Специалисту.
+      tags: [Chatting (Сотрудник и Специалист)]
+      operationId: sendMessage
+      parameters:
+        - name: ticket_id
+          required: true
+          in: path
+          description: Идентификационный номер заявки
+          schema:
+            type: integer
+            format: int64
+            example: 12
+      requestBody:
+        description: Отправка текстового сообщения
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text_message]
+              properties:
+                text_message:
+                  $ref: "#/components/schemas/ChatMessage/properties/text_message"
+      responses:
+        '201':
+          description: Сообщение успешно создано.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Заявка с таким ID не найдена.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        '409':
+          description: Отправка сообщений доступна только у заявки со статусом "В работе".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+
+
+  /categories:
+    get:
+      summary: Получение списка категорий проблем
+      tags: [Users (Администратор), Properties (Администратор), Reporting (Аудитор), Tickets (Сотрудник)]
+      operationId: getCategoriesList
+      description: | 
+        Получение списка категорий проблем Администратором для настройки системы и добавления пользователей, Аудитором для получения списка фильтров, Сотрудником для выбора категории при создании заявки.
+      
+        Доступно строго только Администратору, Аудитору и Сотруднику.
+      responses:
+        '200':
+          description: Список категорий проблем успешно извлечен.
+          content:
+            application/json:
+              schema:
+                type: array
+                description: Список категорий заявок
+                items:
+                  $ref: "#/components/schemas/CategoryItem"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+                    
+    post:
+      summary: Создание категории проблем
+      tags: [Properties (Администратор)]
+      operationId: createCategory
+      description: Доступно строго только Администратору
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category_name]
+              properties:
+                category_name:
+                  $ref: "#/components/schemas/CategoryItem/properties/category_name"
+      responses:
+        '201':
+          description: Новая категория успешно создана.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [category_id]
+                properties:
+                  category_id:
+                    $ref: "#/components/schemas/CategoryItem/properties/category_id"
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '409':
+          description: Категория проблем с таким названием уже существует.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    
+  /categories/{category_id}:  
+    delete:
+      summary: Удаление категории проблем
+      tags: [Properties (Администратор)]
+      operationId: deleteCategory
+      description: |
+        Удаление категорий проблем из системы.
+
+        Заявки у которых уже была выбрана удаляемая категория остаются, категорию нельзя будет выбрать только для новых заявок.
+
+        Доступно строго только Администратору
+      parameters:
+        - name: category_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            example: 5
+      responses:
+        '204':
+          description: Категория проблемы успешно удалена.
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Категория проблемы с таким ID не найдена.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+
+  /departments:
+    get:
+      summary: Получение списка рабочих отделов
+      tags: [Properties (Администратор)]
+      description: Доступно строго только Администратору
+      operationId: getDepartmentsList
+      responses:
+        '200':
+          description: Список рабочих отделов успешно извлечен.
+          content:
+            application/json:
+              schema:
+                type: array
+                description: Список рабочих отделов
+                items:
+                  $ref: "#/components/schemas/DepartmentItem"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+    post:
+      summary: Создание рабочего отдела
+      tags: [Properties (Администратор)]
+      description: Доступно строго только Администратору
+      operationId: createDepartment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [department_name]
+              properties:
+                department_name:
+                  $ref: "#/components/schemas/DepartmentItem/properties/department_name"
+      responses:
+        '201':
+          description: Новый рабочий отдел успешно создан.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [department_id]
+                properties:
+                  department_id:
+                    $ref: "#/components/schemas/DepartmentItem/properties/department_id"
+        '400':
+          $ref: "#/components/responses/BadRequest"
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '409':
+          description: Рабочий отдел с таким названием уже существует.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  
+  /departments/{department_id}:
+    delete:
+      summary: Удаление рабочего отдела
+      tags: [Properties (Администратор)]
+      description: | 
+        Удаление рабочих отделов из системы.
+
+        Пользователи у которых уже был выбран удаляемый рабочий отдел остаются, рабочий отдел нельзя будет выбрать только при создании новых пользователей.
+
+        Доступно строго только Администратору
+      operationId: deleteDepartment
+      parameters:
+        - name: department_id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            example: 5
+      responses:
+        '204':
+          description: Рабочий отдел успешно удален.
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Рабочий отдел с таким ID не найдена.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+
+# Тэги эндпоинтов
+
+
+tags:
+  - name: Authorization
+    description: Авторизация и регистрация пользователей
+  - name: Users (Администратор)
+    description: Управление аккаунтами пользователей
+  - name: Properties (Администратор)
+    description: Настройка параметров системы
+  - name: Tickets (Сотрудник)
+    description: Работа с заявками со стороны сотрудника
+  - name: Tickets (Специалист)
+    description: Работа с заявками со стороны специалиста
+  - name: Chatting (Сотрудник и Специалист)
+    description: Общение между Сотрудником и Специалистом
+  - name: Reporting (Аудитор)
+    description: Отчеты и статистика по работе отдела
+
+
+# Components  
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      description: JWT-токен содержит user_id, role
+      scheme: bearer
+      bearerFormat: JWT
+
+
+  # Cхемы основных ошибок
+
+  responses:
+    BadRequest:
+      description: Ошибка валидации данных.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    Unauthorized:
+      description: Пользователь не авторизован.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    
+    Forbidden:
+      description: У пользователя недостаточно прав.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    
+
+  schemas:
+  
+  # --- Базовая схема ошибки
+
+    ErrorResponse:
+      type: object
+      description: Общая схема ошибки
+      required: [status, message]
+      properties:
+        status: 
+          type: integer
+          example: 500
+        message:
+          type: string
+          example: "Internal Server Error"
+
+  # --- Схемы пользовательских аккаунтов
+  
+    UserAccount:
+      type: object
+      description: Данные аккаунта пользователя
+      properties:
+        login:
+          description: Логин пользователя
+          type: string
+          example: "user_login123"
+        role:
+          description: Роль пользователя в системе
+          type: string
+          enum: [Employee, Specialist, Admin, Auditor]
+          example: "Employee"
+        firstname:
+          description: Имя пользователя
+          type: string
+          example: "Иван"
+        lastname:
+          description: Фамилия пользователя
+          type: string
+          example: "Иванов"
+        workplace:
+          description: Номер рабочего места пользователя. Указывается только у Сотрудника
+          type: [string, "null"]
+          example: 3A
+
+    UserID:
+      type: object
+      required: [user_id]
+      description: Идентификационный номер пользователя
+      properties:
+        user_id:
+          type: integer
+          format: int32
+          example: 12
+          minimum: 1
+
+  # --- Схемы для сброса пароля пользователю
+
+    ResetPassword:
+      type: object
+      required: [new_password]
+      description: Новый пароль пользователя
+      properties:
+        new_password:
+          type: string
+          example: "some_new_password"
+
+
+
+  # --- Схемы заявки
+    
+    TicketID:
+      type: object
+      description: Идентификационный номер заявки
+      properties: 
+        ticket_id:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Идентификационный номер заявки
+    TicketInfo:
+      type: object 
+      description: Системная информация о заявке
+      properties:
+        status:
+          type: string
+          description: Статус заявки в системе
+          enum: ["Создана","В работе","Закрыта специалистом","Отправлена на доработку","Закрыта"]
+          example: "Отправлена на доработку"
+        created_at:
+          type: string
+          format: date-time
+          description: Дата создания заявки
+          example: "2026-09-10T14:30:00Z"
+        closed_at:
+          type: [string, 'null']
+          format: date-time
+          description: Дата закрытия заявки
+          example: "2026-09-10T14:30:00Z"
+    TicketCategory:
+      type: object 
+      description: Категория проблемы у заявки
+      properties:
+        category_name:
+          type: string
+          description: Категория проблемы у заявки
+          example: Устройства ввода
+    TicketOverview:
+      type: object
+      description: Описание проблемы, из-за которой создается заявка
+      properties:
+        overview:
+          type: string
+          description: "Описание проблемы, из-за которой создается заявка"
+          example: "У меня перестала работать корпоративная программа. Никак не могу с ней взаимодействовать."
+    TicketSpecialist:
+      type: object 
+      description: Информация о Специалисте, закрепленным за заявкой
+      properties:
+        firstname_specialist:
+          type: [string, "null"]
+          description: Имя специалиста
+          example: "Иван"
+        lastname_specialist:
+          type: [string, "null"]
+          description: Фамилия специалиста
+          example: "Иванов"
+    TicketEmployee:
+      type: object 
+      description: Информация о Сотруднике, создавшем заявку
+      properties:
+        firstname_employee:
+          type: string
+          description: Имя сотрудника
+          example: "Александр"
+        lastname_employee:
+          type: string
+          description: Фамилия сотрудника
+          example: "Александровов"
+
+
+  # Схема категорий проблем
+  
+    CategoryItem:
+      type: object
+      required: [category_id, category_name]
+      properties:
+        category_id:
+          type: integer
+          description: Идентификатор категории проблем
+          minimum: 1
+          example: 5
+        category_name:
+          description: Название категории проблем
+          type: string
+          example: "Устройства ввода"
+
+  # Схема рабочих отделов
+
+    DepartmentItem:
+      type: object
+      required: [department_id, department_name]
+      properties:
+        department_id:
+          description: Идентификатор рабочего отдела
+          type: integer
+          minimum: 1
+          example: 2
+        department_name:
+          description: Название рабочего отдела
+          type: string
+          example: "Отдел бухгалтерии"
+
+  # Схема аутентификации и авторизации
+
+    AuthRequest:
+      type: object
+      description: Данные для аутентификации
+      required: [login, password]
+      properties:
+        login:
+          type: string
+          description: Логин пользователя
+          example: user_login123
+        password:
+          type: string
+          description: Пароль пользователя
+          example: secret_password
+    
+
+    AuthResponse:
+      type: object
+      required: [access_token, token_type, expires_in, user_id, role]
+      properties:
+        access_token:
+          type: string
+          description: JSON Web Token (JWT) для передачи в заголовке Authorization
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        token_type:
+          type: string
+          description: Тип токена авторизации (всегда Bearer)
+          default: Bearer
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Время жизни токена в секундах
+          example: 86400
+        user_id:
+          type: integer
+          description: Идентификационный номер пользователя
+          format: int32
+          example: 12
+          minimum: 1
+        role:
+          description: Роль пользователя в системе
+          type: string
+          enum: [Employee, Specialist, Admin, Auditor]
+          example: "Employee"
+
+  # Схема сообщений чата
+
+    ChatMessage:
+      type: object
+      description: Схема сообщения в чате
+      required: [message_id, text_message, message_from, sent_at]
+      properties:
+        message_id:
+          type: integer
+          description: Идентификатор сообщения
+          format: int64
+          example: 7
+        text_message:
+          type: string
+          description: Текст сообщения
+          example: "Не могу разобраться куда мне нажать, уточните пожалуйста"
+        message_from:
+          type: string
+          description: Отправитель сообщения (Сотрудник или Специалист)
+          enum: ['Specialist', 'Employee']
+          example: Employee
+        sent_at:
+          type: string
+          description: Дата отправки сообщения
+          format: date-time
+          example: "2026-09-14T14:30:00Z"
