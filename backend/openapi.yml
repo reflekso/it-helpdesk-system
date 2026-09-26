@@ -142,7 +142,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         
-  /users/{user_id}:  
+  /users/{user_id}:
+    get:
+      summary: Получение данных о пользователе
+      description: |
+        Позволяет получить данные о конкретном пользователе.
+
+        Доступно строго только Администратору.
+      tags: ["Users (Администратор)"]
+      operationId: getUserInfo
+      parameters:
+        - name: user_id
+          description: Идентификатор пользователя, у которого изменяются данные
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int32
+            example: 12
+      responses:
+        '200':
+          description: Данные успешно обновлены
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/UserID"
+                  - $ref: "#/components/schemas/UserAccount"
+                  - type: object
+                    properties:
+                      department_id:
+                        $ref: "#/components/schemas/DepartmentItem/properties/department_id" 
+        '401':
+          $ref: "#/components/responses/Unauthorized"
+        '403':
+          $ref: "#/components/responses/Forbidden"
+        '404':
+          description: Пользователь не найден.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
     patch:
       summary: Изменение данных аккаунта пользователю
       description: | 
@@ -651,7 +692,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
           
-
+  /tickets/in-work:
     get:
       summary: Получение информации по заявке
       description: |
@@ -659,16 +700,7 @@ paths:
 
         Доступно строго только Специалисту.
       tags: [Tickets (Специалист)]
-      operationId: getTicketInfo
-      parameters:
-        - name: "ticket_id"
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 1
-            format: int64
-            example: 3
+      operationId: getTicketInWork
       responses:
         '200':
           description: Информация о принятой заявке успешно извлечена.
@@ -705,6 +737,9 @@ paths:
       summary: Получение списка входящих заявок
       description: | 
         Получение списка входящих заявок Специалистом.
+
+        Если у Специалиста есть заявки со статусом "Отправлена на доработку", то
+        ему предоставляются только такие заявки, иначе все заявки в статусе "Создана".
       
         Доступно строго только Специалисту.
       tags: [Tickets (Специалист)]
@@ -870,10 +905,10 @@ paths:
   /categories:
     get:
       summary: Получение списка категорий проблем
-      tags: [Users (Администратор), Properties (Администратор), Reporting (Аудитор), Tickets (Сотрудник)]
+      tags: [Properties (Администратор), Reporting (Аудитор), Tickets (Сотрудник)]
       operationId: getCategoriesList
       description: | 
-        Получение списка категорий проблем Администратором для настройки системы и добавления пользователей, Аудитором для получения списка фильтров, Сотрудником для выбора категории при создании заявки.
+        Получение списка категорий проблем Администратором для настройки системы, Аудитором для получения списка фильтров, Сотрудником для выбора категории при создании заявки.
       
         Доступно строго только Администратору, Аудитору и Сотруднику.
       responses:
@@ -968,8 +1003,11 @@ paths:
   /departments:
     get:
       summary: Получение списка рабочих отделов
-      tags: [Properties (Администратор)]
-      description: Доступно строго только Администратору
+      tags: [Properties (Администратор), Users (Администратор)]
+      description: | 
+        Получение списка рабочих отделов Администратором для настройки системы и добавления пользователей.
+        
+        Доступно строго только Администратору
       operationId: getDepartmentsList
       responses:
         '200':
